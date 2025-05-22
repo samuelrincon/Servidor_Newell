@@ -1,1345 +1,54 @@
-from flask import Flask, render_template_string, request, make_response
+import tkinter as tk
+from tkinter import ttk, messagebox
 import requests
 from bs4 import BeautifulSoup
 import threading
 import time
 from datetime import datetime
-import uuid
 import os
 
-app = Flask(__name__)
+class NewellBrandsVoice:
+    def __init__(self, master):
+        self.master = master
+        self.master.title("Call Monitoring - Newell Brands")
+        self.master.geometry("1100x600")
+        self.master.configure(bg="#F6F0FF")
 
-# Configuration
-API_URL = "https://reports.intouchcx.com/reports/lib/getRealtimeManagementFull.asp"
-REFRESH_INTERVAL = 15000  # 15 seconds
+        # Configuración para Render
+        self.render_mode = os.environ.get('RENDER', 'False').lower() == 'true'
+        if self.render_mode:
+            self.master.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-# User sessions storage
-user_sessions = {}
+        # URL y parámetros de la API
+        self.url = "https://reports.intouchcx.com/reports/lib/getRealtimeManagementFull.asp"
+        self.payload = {
+            'split': '3900,3901,3902,3903,3904,3905,3906,3907,3908,3909,3910,3911,3912,3913,3914,3915,3916,3917,3918,3919,3920,3921,3922,3923,3924,3925,3926,3927,3928,3929,3930,3931,3932,3933,3934,3935,3936,3937,3938,3939,3940,3941,3942,3943,3944,3945,3946,3947,3948,3949,3950,3951,3952,3953,3954,3955,3956,3957,3958,3959,3960,3961,3962,3963,3964,3965,3966,3967,3968,3969,3970,3971,3972,3973',
+            'firstSortCol': 'FullName',
+            'firstSortDir': 'ASC',
+            'secondSortCol': 'FullName',
+            'secondSortDir': 'ASC',
+            'reason': 'all',
+            'state': 'all',
+            'timezone': '1',
+            'altSL': '',
+            'threshold': '180',
+            'altSLThreshold': '0',
+            'acdAlert': '',
+            'acwAlert': '',
+            'holdAlert': '',
+            'slAlert': '',
+            'asaAlert': ''
+        }
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "X-Requested-With": "XMLHttpRequest",
+            "Accept": "text/html, */*; q=0.01",
+            "Referer": "https://reports.intouchcx.com/reports/custom/newellbrands/realtimemanagementfull.asp?threshold=180&tzoffset=est",
+            "Origin": "https://reports.intouchcx.com"
+        }
 
-# HTML Template for the main interface
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Newell Brands - Real-Time Call Monitoring</title>
-    <style>
-        :root {
-            --primary-color: #6A0DAD;
-            --secondary-color: #0056A7;
-            --background-color: #F6F0FF;
-            --card-bg: #FFFFFF;
-            --text-color: #333333;
-            --error-color: #d9534f;
-            --warning-color: #f0ad4e;
-            --success-color: #5cb85c;
-            --info-color: #5bc0de;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: var(--background-color);
-            color: var(--text-color);
-        }
-        
-        .header {
-            background-color: var(--primary-color);
-            color: white;
-            padding: 15px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-        }
-        
-        .header-title {
-            font-size: 24px;
-            font-weight: bold;
-        }
-        
-        .header-brand {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-        
-        .newell-badge {
-            background-color: var(--secondary-color);
-            color: white;
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-weight: bold;
-            font-size: 14px;
-        }
-        
-        .main-container {
-            padding: 20px;
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-        
-        .dashboard-card {
-            background-color: var(--card-bg);
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-        
-        .card-title {
-            font-size: 18px;
-            font-weight: bold;
-            margin-bottom: 15px;
-            color: var(--primary-color);
-            border-bottom: 2px solid var(--primary-color);
-            padding-bottom: 8px;
-        }
-        
-        .notification {
-            background-color: var(--warning-color);
-            color: white;
-            padding: 12px;
-            border-radius: 5px;
-            margin-bottom: 20px;
-            text-align: center;
-            font-weight: bold;
-        }
-        
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 15px 0;
-            font-size: 14px;
-        }
-        
-        th {
-            background-color: var(--primary-color);
-            color: white;
-            padding: 12px;
-            text-align: left;
-            position: sticky;
-            top: 0;
-        }
-        
-        td {
-            padding: 10px;
-            border-bottom: 1px solid #e0e0e0;
-        }
-        
-        tr:nth-child(even) {
-            background-color: #f9f9f9;
-        }
-        
-        tr:hover {
-            background-color: #f1f1f1;
-        }
-        
-        .normal-row {
-            background-color: #DAC8FF;
-        }
-        
-        .alternate-row {
-            background-color: #D0B5FF;
-        }
-        
-        .calls-warning {
-            background-color: #E66F6F;
-        }
-        
-        .sl-warning {
-            background-color: #CE2424;
-            color: white;
-        }
-        
-        .both-warning {
-            background-color: #660002;
-            color: white;
-        }
-        
-        .button-group {
-            display: flex;
-            gap: 10px;
-            margin-top: 20px;
-            flex-wrap: wrap;
-        }
-        
-        .button {
-            display: inline-block;
-            padding: 10px 20px;
-            background-color: var(--primary-color);
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-            font-weight: bold;
-            transition: background-color 0.3s;
-            border: none;
-            cursor: pointer;
-            font-size: 14px;
-        }
-        
-        .button:hover {
-            background-color: #5a0b9d;
-        }
-        
-        .button-warning {
-            background-color: var(--warning-color);
-        }
-        
-        .button-warning:hover {
-            background-color: #ec971f;
-        }
-        
-        .button-danger {
-            background-color: var(--error-color);
-        }
-        
-        .button-danger:hover {
-            background-color: #c9302c;
-        }
-        
-        .last-update {
-            text-align: right;
-            font-style: italic;
-            color: #666;
-            margin-top: 10px;
-            font-size: 12px;
-        }
-        
-        .status-badge {
-            display: inline-block;
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: bold;
-        }
-        
-        .status-acd {
-            background-color: #5cb85c;
-            color: white;
-        }
-        
-        .status-aux {
-            background-color: #f0ad4e;
-            color: white;
-        }
-        
-        .status-acw {
-            background-color: #5bc0de;
-            color: white;
-        }
-        
-        .status-other {
-            background-color: #d9534f;
-            color: white;
-        }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <div class="header-brand">
-            <div class="header-title">IntouchCX</div>
-            <div class="newell-badge">Newell Brands</div>
-        </div>
-        <div>
-            <a href="/queue-dashboard" class="button">Switch to Queue Dashboard</a>
-        </div>
-    </div>
-    
-    <div class="main-container">
-        {% if notification %}
-        <div class="notification">{{ notification }}</div>
-        {% endif %}
-        
-        <div class="dashboard-card">
-            <div class="card-title">Agent Status</div>
-            
-            <table>
-                <thead>
-                    <tr>
-                        <th>Avaya ID</th>
-                        <th>Full Name</th>
-                        <th>State</th>
-                        <th>Reason Code</th>
-                        <th>Active Call</th>
-                        <th>Call Duration</th>
-                        <th>Skill Name</th>
-                        <th>Time in State</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for agent in agents %}
-                    <tr class="{{ agent.row_class }}">
-                        <td>{{ agent.avaya_id }}</td>
-                        <td>{{ agent.full_name }}</td>
-                        <td>
-                            <span class="status-badge status-{{ agent.state_class }}">{{ agent.state }}</span>
-                        </td>
-                        <td>{{ agent.reason_code }}</td>
-                        <td>{{ agent.active_call }}</td>
-                        <td>{{ agent.call_duration }}</td>
-                        <td>{{ agent.skill_name }}</td>
-                        <td>{{ agent.time_in_state }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            
-            <div class="button-group">
-                <a href="/alerts" class="button button-warning">View Alerts ({{ alerts_count }})</a>
-                <a href="/aux" class="button button-warning">View AUX Status ({{ aux_count }})</a>
-                <a href="/queue" class="button button-danger">View Queue ({{ queue_count }})</a>
-                <a href="/settings" class="button">Settings</a>
-            </div>
-            
-            <div class="last-update">Last updated: {{ update_time }}</div>
-        </div>
-    </div>
-    
-    <script>
-        // Auto-refresh the page every 15 seconds
-        setTimeout(function() {
-            window.location.reload();
-        }, {{ refresh_interval }});
-    </script>
-</body>
-</html>
-"""
-
-# Template for alerts page
-ALERTS_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Active Alerts</title>
-    <style>
-        :root {
-            --primary-color: #6A0DAD;
-            --error-color: #d9534f;
-            --warning-color: #f0ad4e;
-            --background-color: #FFB6C1;
-            --card-bg: #FFFFFF;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: var(--background-color);
-        }
-        
-        .header {
-            background-color: var(--primary-color);
-            color: white;
-            padding: 15px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-        }
-        
-        .header-title {
-            font-size: 24px;
-            font-weight: bold;
-        }
-        
-        .main-container {
-            padding: 20px;
-            max-width: 800px;
-            margin: 0 auto;
-        }
-        
-        .alert-card {
-            background-color: var(--card-bg);
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-        
-        .alert-title {
-            font-size: 20px;
-            font-weight: bold;
-            margin-bottom: 15px;
-            color: var(--error-color);
-        }
-        
-        .alert-item {
-            padding: 10px;
-            border-bottom: 1px solid #eee;
-        }
-        
-        .alert-type {
-            font-weight: bold;
-            color: var(--error-color);
-            margin-top: 15px;
-            font-size: 16px;
-        }
-        
-        .no-alerts {
-            text-align: center;
-            padding: 20px;
-            color: #666;
-            font-style: italic;
-        }
-        
-        .button {
-            display: inline-block;
-            padding: 10px 20px;
-            background-color: var(--primary-color);
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-            font-weight: bold;
-            transition: background-color 0.3s;
-        }
-        
-        .button:hover {
-            background-color: #5a0b9d;
-        }
-        
-        .button-container {
-            text-align: center;
-            margin-top: 20px;
-        }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <div class="header-title">⚠️ ACTIVE ALERTS ⚠️</div>
-    </div>
-    
-    <div class="main-container">
-        <div class="alert-card">
-            {% if alerts %}
-                {% for alert_type, items in alerts.items() %}
-                    <div class="alert-type">{{ alert_type }}</div>
-                    {% for item in items %}
-                        <div class="alert-item">{{ item }}</div>
-                    {% endfor %}
-                {% endfor %}
-            {% else %}
-                <div class="no-alerts">No active alerts at this time</div>
-            {% endif %}
-            
-            <div class="button-container">
-                <a href="/" class="button">Back to Dashboard</a>
-            </div>
-        </div>
-    </div>
-    
-    <script>
-        // Auto-refresh the page every 15 seconds
-        setTimeout(function() {
-            window.location.reload();
-        }, {{ refresh_interval }});
-    </script>
-</body>
-</html>
-"""
-
-# Template for AUX status page
-AUX_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>AUX Status</title>
-    <style>
-        :root {
-            --primary-color: #6A0DAD;
-            --warning-color: #f0ad4e;
-            --background-color: #FFB6C1;
-            --card-bg: #FFFFFF;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: var(--background-color);
-        }
-        
-        .header {
-            background-color: var(--primary-color);
-            color: white;
-            padding: 15px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-        }
-        
-        .header-title {
-            font-size: 24px;
-            font-weight: bold;
-        }
-        
-        .main-container {
-            padding: 20px;
-            max-width: 800px;
-            margin: 0 auto;
-        }
-        
-        .aux-card {
-            background-color: var(--card-bg);
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-        
-        .aux-title {
-            font-size: 20px;
-            font-weight: bold;
-            margin-bottom: 15px;
-            color: var(--warning-color);
-        }
-        
-        .aux-item {
-            padding: 10px;
-            border-bottom: 1px solid #eee;
-        }
-        
-        .aux-type {
-            font-weight: bold;
-            color: var(--warning-color);
-            margin-top: 15px;
-            font-size: 16px;
-        }
-        
-        .no-aux {
-            text-align: center;
-            padding: 20px;
-            color: #666;
-            font-style: italic;
-        }
-        
-        .button {
-            display: inline-block;
-            padding: 10px 20px;
-            background-color: var(--primary-color);
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-            font-weight: bold;
-            transition: background-color 0.3s;
-        }
-        
-        .button:hover {
-            background-color: #5a0b9d;
-        }
-        
-        .button-container {
-            text-align: center;
-            margin-top: 20px;
-        }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <div class="header-title">AUX Status</div>
-    </div>
-    
-    <div class="main-container">
-        <div class="aux-card">
-            {% if aux_list %}
-                {% for aux_type, items in aux_list.items() %}
-                    <div class="aux-type">{{ aux_type }}</div>
-                    {% for item in items %}
-                        <div class="aux-item">{{ item }}</div>
-                    {% endfor %}
-                {% endfor %}
-            {% else %}
-                <div class="no-aux">No agents in AUX status</div>
-            {% endif %}
-            
-            <div class="button-container">
-                <a href="/" class="button">Back to Dashboard</a>
-            </div>
-        </div>
-    </div>
-    
-    <script>
-        // Auto-refresh the page every 15 seconds
-        setTimeout(function() {
-            window.location.reload();
-        }, {{ refresh_interval }});
-    </script>
-</body>
-</html>
-"""
-
-# Template for queue page
-QUEUE_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Calls in Queue</title>
-    <style>
-        :root {
-            --primary-color: #6A0DAD;
-            --error-color: #d9534f;
-            --warning-color: #f0ad4e;
-            --background-color: #FFB6C1;
-            --card-bg: #FFFFFF;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: var(--background-color);
-        }
-        
-        .header {
-            background-color: var(--primary-color);
-            color: white;
-            padding: 15px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-        }
-        
-        .header-title {
-            font-size: 24px;
-            font-weight: bold;
-        }
-        
-        .main-container {
-            padding: 20px;
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-        
-        .queue-card {
-            background-color: var(--card-bg);
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-        
-        .queue-title {
-            font-size: 20px;
-            font-weight: bold;
-            margin-bottom: 15px;
-            color: var(--error-color);
-        }
-        
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 15px 0;
-            font-size: 14px;
-        }
-        
-        th {
-            background-color: var(--primary-color);
-            color: white;
-            padding: 12px;
-            text-align: left;
-        }
-        
-        td {
-            padding: 10px;
-            border-bottom: 1px solid #eee;
-        }
-        
-        .has-calls {
-            background-color: #ffcccc;
-        }
-        
-        .no-queue {
-            text-align: center;
-            padding: 20px;
-            color: #666;
-            font-style: italic;
-        }
-        
-        .button {
-            display: inline-block;
-            padding: 10px 20px;
-            background-color: var(--primary-color);
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-            font-weight: bold;
-            transition: background-color 0.3s;
-        }
-        
-        .button:hover {
-            background-color: #5a0b9d;
-        }
-        
-        .button-container {
-            text-align: center;
-            margin-top: 20px;
-        }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <div class="header-title">Calls in Queue</div>
-    </div>
-    
-    <div class="main-container">
-        <div class="queue-card">
-            {% if queue_list %}
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Skill Name</th>
-                            <th>Calls in Queue</th>
-                            <th>Oldest Call</th>
-                            <th>Staffed</th>
-                            <th>Available</th>
-                            <th>RT SL %</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for skill in queue_list %}
-                            {% if skill.calls_in_queue != '0' %}
-                            <tr class="has-calls">
-                                <td>{{ skill.skill_name }}</td>
-                                <td>{{ skill.calls_in_queue }}</td>
-                                <td>{{ skill.oldest_call }}</td>
-                                <td>{{ skill.staffed }}</td>
-                                <td>{{ skill.available }}</td>
-                                <td>{{ skill.rt_sl }}</td>
-                            </tr>
-                            {% endif %}
-                        {% endfor %}
-                    </tbody>
-                </table>
-            {% else %}
-                <div class="no-queue">No calls currently in queue</div>
-            {% endif %}
-            
-            <div class="button-container">
-                <a href="/" class="button">Back to Dashboard</a>
-            </div>
-        </div>
-    </div>
-    
-    <script>
-        // Auto-refresh the page every 15 seconds
-        setTimeout(function() {
-            window.location.reload();
-        }, {{ refresh_interval }});
-    </script>
-</body>
-</html>
-"""
-
-# Template for queue dashboard
-QUEUE_DASHBOARD_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Queue Monitoring Dashboard</title>
-    <style>
-        :root {
-            --primary-color: #6A0DAD;
-            --secondary-color: #0056A7;
-            --background-color: #6a0dad;
-            --card-bg: #FFFFFF;
-            --text-color: #333333;
-            --error-color: #d9534f;
-            --warning-color: #f0ad4e;
-            --success-color: #5cb85c;
-            --info-color: #5bc0de;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: var(--background-color);
-            color: white;
-        }
-        
-        .header {
-            background-color: var(--primary-color);
-            color: white;
-            padding: 15px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-        }
-        
-        .header-title {
-            font-size: 24px;
-            font-weight: bold;
-        }
-        
-        .header-brand {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-        
-        .newell-badge {
-            background-color: var(--secondary-color);
-            color: white;
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-weight: bold;
-            font-size: 14px;
-        }
-        
-        .main-container {
-            padding: 20px;
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-        
-        .dashboard-card {
-            background-color: var(--card-bg);
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-            padding: 20px;
-            margin-bottom: 20px;
-            color: var(--text-color);
-        }
-        
-        .card-title {
-            font-size: 18px;
-            font-weight: bold;
-            margin-bottom: 15px;
-            color: var(--primary-color);
-            border-bottom: 2px solid var(--primary-color);
-            padding-bottom: 8px;
-        }
-        
-        .control-panel {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 20px;
-            background-color: rgba(255, 255, 255, 0.1);
-            padding: 15px;
-            border-radius: 5px;
-        }
-        
-        .view-buttons {
-            display: flex;
-            gap: 10px;
-        }
-        
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 15px 0;
-            font-size: 14px;
-        }
-        
-        th {
-            background-color: var(--primary-color);
-            color: white;
-            padding: 12px;
-            text-align: left;
-            position: sticky;
-            top: 0;
-        }
-        
-        td {
-            padding: 10px;
-            border-bottom: 1px solid #e0e0e0;
-        }
-        
-        .normal-row {
-            background-color: #DAC8FF;
-        }
-        
-        .alternate-row {
-            background-color: #D0B5FF;
-        }
-        
-        .calls-warning {
-            background-color: #E66F6F;
-        }
-        
-        .sl-warning {
-            background-color: #CE2424;
-            color: white;
-        }
-        
-        .both-warning {
-            background-color: #660002;
-            color: white;
-        }
-        
-        .button {
-            display: inline-block;
-            padding: 10px 20px;
-            background-color: var(--primary-color);
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-            font-weight: bold;
-            transition: background-color 0.3s;
-            border: none;
-            cursor: pointer;
-            font-size: 14px;
-        }
-        
-        .button:hover {
-            background-color: #5a0b9d;
-        }
-        
-        .button-active {
-            background-color: #8a2be2;
-        }
-        
-        .button-warning {
-            background-color: var(--warning-color);
-        }
-        
-        .button-warning:hover {
-            background-color: #ec971f;
-        }
-        
-        .button-danger {
-            background-color: var(--error-color);
-        }
-        
-        .button-danger:hover {
-            background-color: #c9302c;
-        }
-        
-        .last-update {
-            text-align: right;
-            font-style: italic;
-            color: #666;
-            margin-top: 10px;
-            font-size: 12px;
-        }
-        
-        .action-buttons {
-            display: flex;
-            gap: 10px;
-        }
-        
-        .toast {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background-color: #4CAF50;
-            color: white;
-            padding: 15px;
-            border-radius: 5px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-            z-index: 1000;
-            display: none;
-            animation: fadein 0.5s, fadeout 0.5s 2.5s;
-        }
-        
-        .toast.error {
-            background-color: #f44336;
-        }
-        
-        @keyframes fadein {
-            from {top: 0; opacity: 0;}
-            to {top: 20px; opacity: 1;}
-        }
-        
-        @keyframes fadeout {
-            from {top: 20px; opacity: 1;}
-            to {top: 0; opacity: 0;}
-        }
-        
-        .copy-help {
-            margin-top: 10px;
-            font-size: 12px;
-            color: #666;
-            text-align: center;
-        }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <div class="header-brand">
-            <div class="header-title">Queue Monitoring Dashboard</div>
-            <div class="newell-badge">Newell Brands</div>
-        </div>
-        <div class="action-buttons">
-            <a href="/" class="button">Back to Agent Dashboard</a>
-            <button id="copySlaBtn" class="button button-warning">Copy SLA Data</button>
-        </div>
-    </div>
-    
-    <div id="toast" class="toast"></div>
-    
-    <div class="main-container">
-        <div class="dashboard-card">
-            <div class="control-panel">
-                <div class="view-buttons">
-                    <a href="?view=main" class="button {% if view == 'main' %}button-active{% endif %}">Main View</a>
-                    <a href="?view=agents" class="button {% if view == 'agents' %}button-active{% endif %}">Agents View</a>
-                </div>
-            </div>
-            
-            <table id="skillsTable">
-                <thead>
-                    <tr>
-                        {% if view == 'main' %}
-                            <th>Skill Name</th>
-                            <th>Calls in Queue</th>
-                            <th>Offered</th>
-                            <th>Answered</th>
-                            <th>Transfers</th>
-                            <th>True Abn</th>
-                            <th>Short Abn</th>
-                            <th>Oldest Call</th>
-                            <th>Max Delay</th>
-                            <th>ASA</th>
-                            <th>AQT</th>
-                            <th>Service Level %</th>
-                            <th>RT SL %</th>
-                        {% else %}
-                            <th>Skill Name</th>
-                            <th>Staffed</th>
-                            <th>Available</th>
-                            <th>ACW</th>
-                            <th>ACD</th>
-                            <th>AUX</th>
-                            <th>Other</th>
-                        {% endif %}
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for skill in skills %}
-                    <tr class="{{ skill.row_class }}">
-                        {% if view == 'main' %}
-                            <td>{{ skill.skill_name }}</td>
-                            <td>{{ skill.calls_in_queue }}</td>
-                            <td>{{ skill.offered }}</td>
-                            <td>{{ skill.answered }}</td>
-                            <td>{{ skill.transfers }}</td>
-                            <td>{{ skill.true_abn }}</td>
-                            <td>{{ skill.short_abn }}</td>
-                            <td>{{ skill.oldest_call }}</td>
-                            <td>{{ skill.max_delay }}</td>
-                            <td>{{ skill.asa }}</td>
-                            <td>{{ skill.aqt }}</td>
-                            <td class="sla-value">{{ skill.service_level }}</td>
-                            <td>{{ skill.rt_sl }}</td>
-                        {% else %}
-                            <td>{{ skill.skill_name }}</td>
-                            <td>{{ skill.staffed }}</td>
-                            <td>{{ skill.available }}</td>
-                            <td>{{ skill.acw }}</td>
-                            <td>{{ skill.acd }}</td>
-                            <td>{{ skill.aux }}</td>
-                            <td>{{ skill.other }}</td>
-                        {% endif %}
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            
-            <div class="last-update">Last updated: {{ update_time }}</div>
-            <div class="copy-help">Click "Copy SLA Data" to copy the SLA information to clipboard</div>
-        </div>
-    </div>
-    
-    <script>
-        // Auto-refresh the page every 15 seconds
-        setTimeout(function() {
-            window.location.reload();
-        }, {{ refresh_interval }});
-        
-        function showToast(message, isError = false) {
-            const toast = document.getElementById('toast');
-            toast.textContent = message;
-            toast.className = isError ? 'toast error' : 'toast';
-            toast.style.display = 'block';
-            setTimeout(() => {
-                toast.style.display = 'none';
-            }, 3000);
-        }
-        
-        function copyToClipboard(text) {
-            return new Promise((resolve, reject) => {
-                // Try modern clipboard API first
-                if (navigator.clipboard) {
-                    navigator.clipboard.writeText(text).then(() => {
-                        resolve(true);
-                    }).catch(err => {
-                        console.error('Modern clipboard failed:', err);
-                        reject(err);
-                    });
-                } else {
-                    // Fallback for older browsers
-                    const textarea = document.createElement('textarea');
-                    textarea.value = text;
-                    textarea.style.position = 'fixed';
-                    textarea.style.top = '0';
-                    textarea.style.left = '0';
-                    textarea.style.width = '2em';
-                    textarea.style.height = '2em';
-                    textarea.style.padding = '0';
-                    textarea.style.border = 'none';
-                    textarea.style.outline = 'none';
-                    textarea.style.boxShadow = 'none';
-                    textarea.style.background = 'transparent';
-                    document.body.appendChild(textarea);
-                    textarea.select();
-                    
-                    try {
-                        const successful = document.execCommand('copy');
-                        document.body.removeChild(textarea);
-                        if (successful) {
-                            resolve(true);
-                        } else {
-                            reject(new Error('Copy command failed'));
-                        }
-                    } catch (err) {
-                        document.body.removeChild(textarea);
-                        reject(err);
-                    }
-                }
-            });
-        }
-        
-        async function copySlaDataToClipboard() {
-            try {
-                const lowSlaSkills = [];
-                const rows = document.querySelectorAll('#skillsTable tbody tr');
-                
-                // Collect SLA data
-                rows.forEach(row => {
-                    const skillName = row.querySelector('td:nth-child(1)')?.textContent.trim();
-                    const slaText = row.querySelector('td.sla-value')?.textContent.trim();
-                    
-                    if (skillName && slaText) {
-                        // Extract numeric value from SLA text
-                        const slaValue = parseFloat(slaText.replace(/[^\d.]/g, ''));
-                        if (!isNaN(slaValue) && slaValue < 80) {
-                            lowSlaSkills.push({
-                                name: skillName,
-                                value: slaText
-                            });
-                        }
-                    }
-                });
-                
-                // Build the text to copy
-                let textToCopy = "Voice - Queue\n\n";
-                
-                if (lowSlaSkills.length > 0) {
-                    textToCopy += "Team, this is our current SLA view and listed you'll find the impacted skills so far:\n\n";
-                    lowSlaSkills.forEach(skill => {
-                        textToCopy += `-${skill.name} = ${skill.value}\n`;
-                    });
-                    textToCopy += "\nThe other skills are on target.";
-                } else {
-                    textToCopy += "All skills are meeting SLA targets (80% or above)";
-                }
-                
-                // Copy to clipboard
-                try {
-                    await copyToClipboard(textToCopy);
-                    showToast('SLA data copied to clipboard!');
-                    console.log('Copied to clipboard:', textToCopy);
-                } catch (error) {
-                    console.error('Failed to copy:', error);
-                    showToast('Failed to copy. Please copy manually:', true);
-                    prompt('Copy this text:', textToCopy);
-                }
-            } catch (error) {
-                console.error('Error generating SLA data:', error);
-                showToast('Error generating SLA data', true);
-            }
-        }
-        
-        // Initialize after DOM is loaded
-        document.addEventListener('DOMContentLoaded', function() {
-            const copyBtn = document.getElementById('copySlaBtn');
-            if (copyBtn) {
-                copyBtn.addEventListener('click', copySlaDataToClipboard);
-            }
-        });
-    </script>
-</body>
-</html>
-"""
-
-# Template for settings page
-SETTINGS_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Alert Settings</title>
-    <style>
-        :root {
-            --primary-color: #6A0DAD;
-            --error-color: #d9534f;
-            --warning-color: #f0ad4e;
-            --success-color: #5cb85c;
-            --background-color: #F6F0FF;
-            --card-bg: #FFFFFF;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: var(--background-color);
-        }
-        
-        .header {
-            background-color: var(--primary-color);
-            color: white;
-            padding: 15px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-        }
-        
-        .header-title {
-            font-size: 24px;
-            font-weight: bold;
-        }
-        
-        .main-container {
-            padding: 20px;
-            max-width: 600px;
-            margin: 0 auto;
-        }
-        
-        .settings-card {
-            background-color: var(--card-bg);
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-        
-        .settings-title {
-            font-size: 20px;
-            font-weight: bold;
-            margin-bottom: 20px;
-            color: var(--primary-color);
-            text-align: center;
-        }
-        
-        .form-group {
-            margin-bottom: 15px;
-        }
-        
-        label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-        
-        input {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            font-size: 16px;
-        }
-        
-        .message {
-            padding: 10px;
-            margin-bottom: 20px;
-            border-radius: 5px;
-            text-align: center;
-        }
-        
-        .success {
-            background-color: #d4edda;
-            color: #155724;
-        }
-        
-        .error {
-            background-color: #f8d7da;
-            color: #721c24;
-        }
-        
-        .button-group {
-            display: flex;
-            justify-content: center;
-            gap: 10px;
-            margin-top: 20px;
-        }
-        
-        .button {
-            display: inline-block;
-            padding: 10px 20px;
-            background-color: var(--primary-color);
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-            font-weight: bold;
-            transition: background-color 0.3s;
-            border: none;
-            cursor: pointer;
-        }
-        
-        .button:hover {
-            background-color: #5a0b9d;
-        }
-        
-        .button-secondary {
-            background-color: #6c757d;
-        }
-        
-        .button-secondary:hover {
-            background-color: #5a6268;
-        }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <div class="header-title">Alert Settings</div>
-    </div>
-    
-    <div class="main-container">
-        <div class="settings-card">
-            <div class="settings-title">Alert Threshold Settings</div>
-            
-            {% if message %}
-            <div class="message {{ message.type }}">{{ message.text }}</div>
-            {% endif %}
-            
-            <form method="POST" action="/settings">
-                {% for alert, time in alert_times.items() %}
-                <div class="form-group">
-                    <label for="{{ alert }}">{{ alert }} (seconds):</label>
-                    <input type="number" id="{{ alert }}" name="{{ alert }}" value="{{ time }}" min="1">
-                </div>
-                {% endfor %}
-                
-                <div class="button-group">
-                    <button type="submit" class="button">Apply Changes</button>
-                    <a href="/" class="button button-secondary">Cancel</a>
-                    <button type="button" onclick="resetDefaults()" class="button button-secondary">Reset Defaults</button>
-                </div>
-            </form>
-        </div>
-    </div>
-    
-    <script>
-        function resetDefaults() {
-            document.getElementById('Long Call').value = 360;
-            document.getElementById('Extended Lunch').value = 3600;
-            document.getElementById('Long ACW').value = 120;
-            document.getElementById('Extended Break').value = 900;
-            document.getElementById('IT Issue').value = 30;
-            document.getElementById('Long Hold').value = 120;
-        }
-    </script>
-</body>
-</html>
-"""
-
-class UserSession:
-    def __init__(self):
+        # Tiempos predeterminados para las alertas
         self.alert_times = {
             "Long Call": 360,
             "Extended Lunch": 3600,
@@ -1348,11 +57,17 @@ class UserSession:
             "IT Issue": 30,
             "Long Hold": 120
         }
-        self.alert_list = []
-        self.aux_list = []
-        self.queue_list = []
-        self.agents = []
-        self.total_calls_in_queue = 0
+
+        # Variable global para manejar la actualización
+        self.update_task = None
+        self.running = True  # Flag para controlar las actualizaciones
+
+        self.alert_list = []  # Lista para manejar las alertas
+        self.aux_list = []    # Lista para manejar los AUX
+        self.queue_list = []  # Lista para manejar las llamadas en cola
+        self.total_calls_in_queue = 0  # Total de llamadas en cola
+
+        # Lista de todas las skills disponibles
         self.all_skills = {
             '3900': 'Newell Brands EN (3900)',
             '3901': 'Newell Brands FR (3901)',
@@ -1387,54 +102,13 @@ class UserSession:
             '3964': 'Newell Brands Retail Express CB EN (3964)',
             '3965': 'Newell Brands Other CB EN (3965)'
         }
-        
-        # Start data update thread
-        self.running = True
-        self.update_thread = threading.Thread(target=self.update_data_loop, daemon=True)
-        self.update_thread.start()
-    
-    def update_data_loop(self):
-        while self.running:
-            self.fetch_data()
-            time.sleep(15)
-    
-    def fetch_data(self):
-        try:
-            payload = {
-                'split': '3900,3901,3902,3903,3904,3905,3906,3907,3908,3909,3910,3911,3912,3913,3914,3915,3916,3917,3918,3919,3920,3921,3922,3923,3924,3925,3926,3927,3928,3929,3930,3931,3932,3933,3934,3935,3936,3937,3938,3939,3940,3941,3942,3943,3944,3945,3946,3947,3948,3949,3950,3951,3952,3953,3954,3955,3956,3957,3958,3959,3960,3961,3962,3963,3964,3965,3966,3967,3968,3969,3970,3971,3972,3973',
-                'firstSortCol': 'FullName',
-                'firstSortDir': 'ASC',
-                'secondSortCol': 'FullName',
-                'secondSortDir': 'ASC',
-                'reason': 'all',
-                'state': 'all',
-                'timezone': '1',
-                'altSL': '',
-                'threshold': '180',
-                'altSLThreshold': '0',
-                'acdAlert': '',
-                'acwAlert': '',
-                'holdAlert': '',
-                'slAlert': '',
-                'asaAlert': ''
-            }
 
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                "X-Requested-With": "XMLHttpRequest",
-                "Accept": "text/html, */*; q=0.01",
-                "Referer": "https://reports.intouchcx.com/reports/custom/newellbrands/realtimemanagementfull.asp?threshold=180&tzoffset=est",
-                "Origin": "https://reports.intouchcx.com"
-            }
+        # Crear la interfaz gráfica
+        self.create_interface()
 
-            response = requests.post(API_URL, headers=headers, data=payload, timeout=10)
-            response.raise_for_status()
-            
-            self.process_response(response.text)
-        except Exception as e:
-            print(f"Error fetching data: {str(e)}")
-    
+        # Actualización automática de la tabla
+        self.update_table()
+
     def time_to_seconds(self, time_str):
         try:
             parts = list(map(int, time_str.split(":")))
@@ -1445,46 +119,52 @@ class UserSession:
             return 0
         except (ValueError, AttributeError):
             return 0
-    
+
     def parse_queue_data(self, soup):
         data = []
         total_calls_in_queue = 0
         
+        # Buscar todas las filas de datos en la tabla
         rows = soup.find_all('tr', class_='data')
         
         for row in rows:
+            # Buscamos filas que contengan datos de skills
             skill_cell = row.find('td', colspan='3', class_='nowrap')
             if skill_cell and 'Skill Name' not in skill_cell.get_text():
                 skill_name = skill_cell.get_text(strip=True)
-                skill_id = ""
                 
+                # Extraer el ID de skill (está entre paréntesis)
+                skill_id = ""
                 if "(" in skill_name and ")" in skill_name:
                     skill_id = skill_name.split("(")[-1].split(")")[0].strip()
                 
+                # Solo procesar si es una skill que conocemos
                 if skill_id in self.all_skills:
+                    # El siguiente td después del nombre de la skill es Calls in Queue
                     calls_in_queue_cell = skill_cell.find_next_sibling('td')
                     if calls_in_queue_cell:
                         calls_in_queue = calls_in_queue_cell.get_text(strip=True)
                         
-                        # Get staffed and available counts
+                        # Buscamos las celdas de Staffed y Available
                         staffed_cell = calls_in_queue_cell
-                        for _ in range(12):
+                        for _ in range(12):  # Avanzamos 12 celdas desde Calls in Queue
                             staffed_cell = staffed_cell.find_next_sibling('td')
                         
                         available_cell = staffed_cell.find_next_sibling('td')
                         
-                        # Get oldest call
+                        # Celda de Oldest Call (7 celdas después de Calls in Queue)
                         oldest_call_cell = calls_in_queue_cell
                         for _ in range(7):
                             oldest_call_cell = oldest_call_cell.find_next_sibling('td')
                         oldest_call = oldest_call_cell.get_text(strip=True) if oldest_call_cell else '00:00'
                         
-                        # Get RT SL
+                        # Celda de RT SL (15 celdas después de Calls in Queue)
                         rt_sl_cell = calls_in_queue_cell
                         for _ in range(15):
                             rt_sl_cell = rt_sl_cell.find_next_sibling('td')
                         rt_sl = rt_sl_cell.get_text(strip=True) if rt_sl_cell else '100.00%'
                         
+                        # Solo procesar si calls_in_queue es un número
                         if calls_in_queue.isdigit():
                             calls_int = int(calls_in_queue)
                             total_calls_in_queue += calls_int
@@ -1500,97 +180,130 @@ class UserSession:
                             })
         
         return data, total_calls_in_queue
-    
-    def process_response(self, html_content):
-        soup = BeautifulSoup(html_content, 'html.parser')
-        
-        # Clear previous data
-        self.alert_list = []
-        self.aux_list = []
-        self.queue_list = []
-        self.agents = []
-        self.total_calls_in_queue = 0
 
-        # Process agent data
-        rows = soup.find_all('tr', class_='data')
-        for i, row in enumerate(rows):
-            cols = row.find_all('td')
-            if len(cols) >= 9:
-                avaya_id = cols[0].text.strip()
-                full_name = cols[1].text.strip()
-                state = cols[2].text.strip().upper()
-                reason_code = cols[3].text.strip().upper()
-                active_call = cols[4].text.strip()
-                call_duration = cols[5].text.strip()
-                skill_name = cols[6].text.strip()
-                time_in_state = cols[7].text.strip()
+    def update_table(self):
+        if not self.running:  # Si la aplicación está cerrando, no hacer nada
+            return
+            
+        try:
+            response = requests.post(self.url, data=self.payload, headers=self.headers, timeout=10)
 
-                call_duration_sec = self.time_to_seconds(call_duration)
-                time_in_state_sec = self.time_to_seconds(time_in_state)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
 
-                # Determine row class for alternating colors
-                row_class = "normal-row" if i % 2 == 0 else "alternate-row"
+                # Limpiar listas y tabla
+                self.tree.delete(*self.tree.get_children())
+                self.alert_list.clear()
+                self.aux_list.clear()
+                self.queue_list.clear()
+                self.total_calls_in_queue = 0
+
+                # Extraer datos de la tabla principal (agentes)
+                rows = soup.find_all('tr', class_='data')
+                for row in rows:
+                    cols = row.find_all('td')
+                    if len(cols) >= 9:
+                        avaya_id = cols[0].text.strip()
+                        full_name = cols[1].text.strip()
+                        state = cols[2].text.strip().upper()
+                        reason_code = cols[3].text.strip().upper()
+                        active_call = cols[4].text.strip()
+                        call_duration = cols[5].text.strip()
+                        skill_name = cols[6].text.strip()
+                        time_in_state = cols[7].text.strip()
+
+                        call_duration_sec = self.time_to_seconds(call_duration)
+                        time_in_state_sec = self.time_to_seconds(time_in_state)
+
+                        # Check for AUX states
+                        aux_codes = ["EMAIL 1", "EMAIL 2", "CSR LEVEL II", "QUALITY COACHING",
+                                   "TL INTERN", "FLOOR SUPPORT", "CHAT", "BRAND SPECIALIST", "PERFORMANCE ANALYST",
+                                    "BACK OFFICE", "TRAINING"]
+                        if state == "AUX" and reason_code in aux_codes:
+                            self.aux_list.append((reason_code, avaya_id, full_name, time_in_state))
+
+                        alert = ""
+                        alert_time = ""
+
+                        if state == "ACD" and call_duration_sec > self.alert_times["Long Call"]:
+                            alert = "Long Call"
+                            alert_time = call_duration
+                        elif "LUNCH" in reason_code and time_in_state_sec > self.alert_times["Extended Lunch"]:
+                            alert = "Extended Lunch"
+                            alert_time = time_in_state
+                        elif state == "ACW" and time_in_state_sec > self.alert_times["Long ACW"]:
+                            alert = "Long ACW"
+                            alert_time = time_in_state
+                        elif state == "AUX" and "BREAK" in reason_code and time_in_state_sec > self.alert_times["Extended Break"]:
+                            alert = "Extended Break"
+                            alert_time = time_in_state
+                        elif state == "AUX" and "IT ISSUE" in reason_code and time_in_state_sec > self.alert_times["IT Issue"]:
+                            alert = "IT Issue"
+                            alert_time = time_in_state
+                        elif state == "AUX" and "DEFAULT" in reason_code:
+                            alert = "Default Detected"
+                            alert_time = time_in_state
+                        elif state == "OTHER (HOLD)" and time_in_state_sec > self.alert_times["Long Hold"]:
+                            alert = "Long Hold"
+                            alert_time = time_in_state
+
+                        if alert:
+                            self.alert_list.append((alert, avaya_id, full_name, alert_time))
+
+                        # Alternar colores de las filas
+                        if len(self.tree.get_children()) % 2 == 0:
+                            self.tree.insert("", "end", values=(avaya_id, full_name, state, reason_code, active_call, call_duration, skill_name, time_in_state), tags=("even",))
+                        else:
+                            self.tree.insert("", "end", values=(avaya_id, full_name, state, reason_code, active_call, call_duration, skill_name, time_in_state), tags=("odd",))
+
+                # Procesar datos de llamadas en cola
+                queue_data, self.total_calls_in_queue = self.parse_queue_data(soup)
                 
-                # Determine state class for badge styling
-                state_class = "other"
-                if state == "ACD":
-                    state_class = "acd"
-                elif state == "AUX":
-                    state_class = "aux"
-                elif state == "ACW":
-                    state_class = "acw"
-                elif "HOLD" in state:
-                    state_class = "other"
+                # Asegurarse de que todas las skills estén representadas
+                skills_in_data = {item['skill_id'] for item in queue_data}
+                for skill_id, skill_name in self.all_skills.items():
+                    if skill_id not in skills_in_data:
+                        queue_data.append({
+                            'skill_id': skill_id,
+                            'skill_name': skill_name,
+                            'calls_in_queue': "0",
+                            'oldest_call': "00:00",
+                            'rt_sl': "100.00%",
+                            'staffed': "0",
+                            'available': "0"
+                        })
+                
+                # Ordenar por nombre de skill
+                self.queue_list = sorted(queue_data, key=lambda x: x['skill_name'])
 
-                # Add agent to display list
-                self.agents.append({
-                    'avaya_id': avaya_id,
-                    'full_name': full_name,
-                    'state': state,
-                    'state_class': state_class,
-                    'reason_code': reason_code,
-                    'active_call': active_call,
-                    'call_duration': call_duration,
-                    'skill_name': skill_name,
-                    'time_in_state': time_in_state,
-                    'row_class': row_class
-                })
+                # Mostrar notificación si hay llamadas en cola
+                if self.total_calls_in_queue > 0:
+                    # Mostrar notificación en la interfaz
+                    if not hasattr(self, 'notification_label') or not self.notification_label.winfo_exists():
+                        self.notification_label = tk.Label(
+                            self.master,
+                            text=f"¡{self.total_calls_in_queue} llamadas en cola! Haga clic en 'View Queue' para ver detalles.",
+                            bg="red", fg="white", font=("Arial", 12, "bold"),
+                            padx=10, pady=5
+                        )
+                        self.notification_label.place(relx=0.5, rely=0.25, anchor="center")
+                else:
+                    # Eliminar notificación si existe
+                    if hasattr(self, 'notification_label') and self.notification_label.winfo_exists():
+                        self.notification_label.destroy()
+                        delattr(self, 'notification_label')
 
-                # Check for AUX states
-                aux_codes = ["EMAIL 1", "EMAIL 2", "CSR LEVEL II", "QUALITY COACHING",
-                           "TL INTERN", "FLOOR SUPPORT", "CHAT", "BRAND SPECIALIST", "PERFORMANCE ANALYST",
-                            "BACK OFFICE", "TRAINING"]
-                if state == "AUX" and reason_code in aux_codes:
-                    self.aux_list.append((reason_code, avaya_id, full_name, time_in_state))
+            else:
+                messagebox.showerror("Error", f"Failed to fetch data: HTTP {response.status_code}")
 
-                # Check for alerts
-                alert = ""
-                if state == "ACD" and call_duration_sec > self.alert_times["Long Call"]:
-                    alert = "Long Call"
-                elif "LUNCH" in reason_code and time_in_state_sec > self.alert_times["Extended Lunch"]:
-                    alert = "Extended Lunch"
-                elif state == "ACW" and time_in_state_sec > self.alert_times["Long ACW"]:
-                    alert = "Long ACW"
-                elif state == "AUX" and "BREAK" in reason_code and time_in_state_sec > self.alert_times["Extended Break"]:
-                    alert = "Extended Break"
-                elif state == "AUX" and "IT ISSUE" in reason_code and time_in_state_sec > self.alert_times["IT Issue"]:
-                    alert = "IT Issue"
-                elif state == "AUX" and "DEFAULT" in reason_code:
-                    alert = "Default Detected"
-                elif state == "OTHER (HOLD)" and time_in_state_sec > self.alert_times["Long Hold"]:
-                    alert = "Long Hold"
-
-                if alert:
-                    self.alert_list.append((alert, avaya_id, full_name, call_duration if "Call" in alert else time_in_state))
-
-        # Process queue data
-        queue_data, self.total_calls_in_queue = self.parse_queue_data(soup)
-        
-        # Ensure all skills are represented
-        skills_in_data = {item['skill_id'] for item in queue_data}
-        for skill_id, skill_name in self.all_skills.items():
-            if skill_id not in skills_in_data:
-                queue_data.append({
+        except requests.exceptions.RequestException as e:
+            messagebox.showerror("Error", f"Network error: {str(e)}")
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred: {str(e)}")
+            # En caso de error, asegurarse de que todas las skills estén representadas
+            self.queue_list = []
+            for skill_id, skill_name in self.all_skills.items():
+                self.queue_list.append({
                     'skill_id': skill_id,
                     'skill_name': skill_name,
                     'calls_in_queue': "0",
@@ -1599,16 +312,904 @@ class UserSession:
                     'staffed': "0",
                     'available': "0"
                 })
-        
-        # Sort by skill name
-        self.queue_list = sorted(queue_data, key=lambda x: x['skill_name'])
 
-        # Process skills data for queue dashboard
-        self.skills_data = []
-        skill_rows = soup.find_all('tr', class_='data')[2:]
-        for row in skill_rows:
-            cells = row.find_all('td')
-            if len(cells) >= 19:
+        # Actualizar la tabla cada 15 segundos si la aplicación sigue corriendo
+        if self.running:
+            self.update_task = self.master.after(15000, self.update_table)
+
+    def show_settings_window(self):
+        settings_window = tk.Toplevel(self.master)
+        settings_window.title("Alert Settings")
+        settings_window.geometry("400x300")
+        settings_window.configure(bg="#F6F0FF")
+
+        # Frame principal
+        main_frame = tk.Frame(settings_window, bg="#F6F0FF")
+        main_frame.pack(fill="both", expand=True, padx=20, pady=10)
+
+        title_label = tk.Label(main_frame, text="Alert Settings",
+                             font=("Arial", 16, "bold"), fg="black", bg="#F6F0FF")
+        title_label.pack(pady=10)
+
+        # Frame para los tiempos personalizados
+        custom_frame = tk.Frame(main_frame, bg="#F6F0FF")
+        custom_frame.pack(fill="x", pady=10)
+
+        # Entradas para los tiempos personalizados
+        self.custom_times = {}
+        for alert, time in self.alert_times.items():
+            row_frame = tk.Frame(custom_frame, bg="#F6F0FF")
+            row_frame.pack(fill="x", pady=5)
+
+            label = tk.Label(row_frame, text=f"{alert}:", font=("Arial", 12), bg="#F6F0FF")
+            label.pack(side="left", padx=5)
+
+            entry = tk.Entry(row_frame, font=("Arial", 12), width=10)
+            entry.insert(0, str(time))
+            entry.pack(side="right", padx=5)
+            self.custom_times[alert] = entry
+
+        # Botón para aplicar los cambios
+        apply_button = tk.Button(main_frame, text="Aplicar",
+                               command=lambda: self.apply_custom_times(settings_window),
+                               bg="#6A0DAD", fg="white", font=("Arial", 12, "bold"))
+        apply_button.pack(pady=10)
+
+        # Botón para usar los tiempos predeterminados
+        default_button = tk.Button(main_frame, text="Use Default Times",
+                                 command=lambda: self.use_default_times(settings_window),
+                                 bg="#6A0DAD", fg="white", font=("Arial", 12, "bold"))
+        default_button.pack(pady=10)
+
+    def apply_custom_times(self, settings_window):
+        try:
+            for alert, entry in self.custom_times.items():
+                self.alert_times[alert] = int(entry.get())
+            messagebox.showinfo("Success", "Custom times applied successfully!")
+            settings_window.destroy()
+        except ValueError:
+            messagebox.showerror("Error", "Please enter valid numbers for all fields.")
+
+    def use_default_times(self, settings_window):
+        self.alert_times = {
+            "Long Call": 360,
+            "Extended Lunch": 3600,
+            "Long ACW": 120,
+            "Extended Break": 900,
+            "IT Issue": 30,
+            "Long Hold": 120
+        }
+        messagebox.showinfo("Success", "Default times restored successfully!")
+        settings_window.destroy()
+
+    def show_alert_window(self):
+        if hasattr(self, 'alert_window') and self.alert_window.winfo_exists():
+            self.alert_window.lift()
+            return
+            
+        self.alert_window = tk.Toplevel(self.master)
+        self.alert_window.title("⚠️ ACTIVE ALERTS ⚠️")
+        self.alert_window.geometry("600x500")
+        self.alert_window.configure(bg="#FFB6C1")
+
+        # Frame principal para el contenido
+        self.main_frame = tk.Frame(self.alert_window, bg="#FFB6C1")
+        self.main_frame.pack(fill="both", expand=True, padx=20, pady=10)
+
+        self.title_label = tk.Label(self.main_frame, text="⚠️ ACTIVE ALERTS ⚠️",
+                                  font=("Arial", 20, "bold"), fg="black", bg="#FFB6C1")
+        self.title_label.pack(pady=10)
+
+        # Frame para el contenido con scroll
+        self.content_frame = tk.Frame(self.main_frame, bg="white", bd=2, relief="solid")
+        self.content_frame.pack(fill="both", expand=True, pady=(0, 10))
+
+        # Canvas y scrollbar
+        self.canvas = tk.Canvas(self.content_frame, bg="white")
+        self.scrollbar = ttk.Scrollbar(self.content_frame, orient="vertical", command=self.canvas.yview)
+
+        # Frame dentro del canvas
+        self.alert_frame = tk.Frame(self.canvas, bg="white")
+
+        # Configurar el canvas
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+
+        # Crear ventana en el canvas
+        self.canvas_frame = self.canvas.create_window((0, 0), window=self.alert_frame, anchor="nw")
+
+        # Función para actualizar las alertas
+        def update_alerts():
+            if not self.alert_window.winfo_exists():  # Si la ventana fue cerrada, no hacer nada
+                return
+                
+            # Limpiar el contenido actual
+            for widget in self.alert_frame.winfo_children():
+                widget.destroy()
+
+            # Mostrar las alertas actualizadas
+            if not self.alert_list:
+                no_alerts_label = tk.Label(self.alert_frame, text="No active alerts at the moment.",
+                                         font=("Arial", 14, "italic"), fg="gray", bg="white")
+                no_alerts_label.pack(pady=20)
+            else:
+                alert_dict = {}
+                for alert, avaya_id, full_name, alert_time in self.alert_list:
+                    if alert not in alert_dict:
+                        alert_dict[alert] = []
+                    alert_dict[alert].append(f"{avaya_id} - {full_name} ({alert_time})")
+
+                for alert_type, users in alert_dict.items():
+                    title = tk.Label(self.alert_frame, text=alert_type.upper(),
+                                   font=("Arial", 16, "bold"), fg="red", bg="white")
+                    title.pack(pady=5)
+
+                    for user in users:
+                        alert_label = tk.Label(self.alert_frame, text=user,
+                                             font=("Arial", 12), bg="white")
+                        alert_label.pack(anchor="w", padx=10)
+
+            # Programar la próxima actualización si la ventana sigue abierta
+            if self.alert_window.winfo_exists():
+                self.alert_window.after(15000, update_alerts)
+
+        # Llamar a la función de actualización por primera vez
+        update_alerts()
+
+        # Frame para el botón
+        button_frame = tk.Frame(self.alert_window, bg="#FFB6C1")
+        button_frame.pack(fill="x", pady=10)
+
+        close_button = tk.Button(button_frame, text="Close",
+                               font=("Arial", 12, "bold"), bg="red", fg="white",
+                               command=self.alert_window.destroy)
+        close_button.pack(pady=5)
+
+        # Configurar el scroll
+        def _on_frame_configure(event):
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+            self.canvas.itemconfig(self.canvas_frame, width=self.canvas.winfo_width())
+
+        self.alert_frame.bind("<Configure>", _on_frame_configure)
+
+        def _on_mousewheel(event):
+            if self.alert_window.winfo_exists():
+                self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        def _on_closing():
+            self.canvas.unbind_all("<MouseWheel>")
+            self.alert_window.destroy()
+
+        self.alert_window.protocol("WM_DELETE_WINDOW", _on_closing)
+
+    def show_aux_window(self):
+        if hasattr(self, 'aux_window') and self.aux_window.winfo_exists():
+            self.aux_window.lift()
+            return
+            
+        self.aux_window = tk.Toplevel(self.master)
+        self.aux_window.title("AUX Status")
+        self.aux_window.geometry("600x500")
+        self.aux_window.configure(bg="#FFB6C1")
+
+        # Frame principal
+        self.main_frame_aux = tk.Frame(self.aux_window, bg="#FFB6C1")
+        self.main_frame_aux.pack(fill="both", expand=True, padx=20, pady=10)
+
+        self.title_label_aux = tk.Label(self.main_frame_aux, text="AUX Status",
+                                      font=("Arial", 20, "bold"), fg="black", bg="#FFB6C1")
+        self.title_label_aux.pack(pady=10)
+
+        # Frame para el contenido con scroll
+        self.content_frame_aux = tk.Frame(self.main_frame_aux, bg="white", bd=2, relief="solid")
+        self.content_frame_aux.pack(fill="both", expand=True, pady=(0, 10))
+
+        # Canvas y scrollbar
+        self.canvas_aux = tk.Canvas(self.content_frame_aux, bg="white")
+        self.scrollbar_aux = ttk.Scrollbar(self.content_frame_aux, orient="vertical", command=self.canvas_aux.yview)
+
+        # Frame dentro del canvas
+        self.aux_frame = tk.Frame(self.canvas_aux, bg="white")
+
+        # Configurar el canvas
+        self.canvas_aux.configure(yscrollcommand=self.scrollbar_aux.set)
+        self.canvas_aux.pack(side="left", fill="both", expand=True)
+        self.scrollbar_aux.pack(side="right", fill="y")
+
+        # Crear ventana en el canvas
+        self.canvas_frame_aux = self.canvas_aux.create_window((0, 0), window=self.aux_frame, anchor="nw")
+
+        # Función para actualizar el contenido de AUX
+        def update_aux():
+            if not self.aux_window.winfo_exists():  # Si la ventana fue cerrada, no hacer nada
+                return
+                
+            # Limpiar el contenido actual
+            for widget in self.aux_frame.winfo_children():
+                widget.destroy()
+
+            # Mostrar el contenido actualizado
+            if not self.aux_list:
+                no_aux_label = tk.Label(self.aux_frame, text="No agents in AUX status.",
+                                      font=("Arial", 14, "italic"), fg="gray", bg="white")
+                no_aux_label.pack(pady=20)
+            else:
+                aux_dict = {}
+                for aux_type, avaya_id, full_name, time_in_state in self.aux_list:
+                    if aux_type not in aux_dict:
+                        aux_dict[aux_type] = []
+                    aux_dict[aux_type].append(f"{avaya_id} - {full_name} ({time_in_state})")
+
+                for aux_type, users in aux_dict.items():
+                    title = tk.Label(self.aux_frame, text=aux_type,
+                                   font=("Arial", 16, "bold"), fg="purple", bg="white")
+                    title.pack(pady=5)
+
+                    for user in users:
+                        aux_label = tk.Label(self.aux_frame, text=user,
+                                            font=("Arial", 12), bg="white")
+                        aux_label.pack(anchor="w", padx=10)
+
+            # Programar la próxima actualización si la ventana sigue abierta
+            if self.aux_window.winfo_exists():
+                self.aux_window.after(15000, update_aux)
+
+        # Llamar a la función de actualización por primera vez
+        update_aux()
+
+        # Frame para el botón
+        button_frame = tk.Frame(self.aux_window, bg="#FFB6C1")
+        button_frame.pack(fill="x", pady=10)
+
+        close_button = tk.Button(button_frame, text="Close",
+                               font=("Arial", 12, "bold"), bg="red", fg="white",
+                               command=self.aux_window.destroy)
+        close_button.pack(pady=5)
+
+        # Configurar el scroll
+        def _on_frame_configure(event):
+            self.canvas_aux.configure(scrollregion=self.canvas_aux.bbox("all"))
+            self.canvas_aux.itemconfig(self.canvas_frame_aux, width=self.canvas_aux.winfo_width())
+
+        self.aux_frame.bind("<Configure>", _on_frame_configure)
+
+        def _on_mousewheel(event):
+            if self.aux_window.winfo_exists():
+                self.canvas_aux.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        self.canvas_aux.bind_all("<MouseWheel>", _on_mousewheel)
+
+        def _on_closing():
+            self.canvas_aux.unbind_all("<MouseWheel>")
+            self.aux_window.destroy()
+
+        self.aux_window.protocol("WM_DELETE_WINDOW", _on_closing)
+
+    def show_queue_window(self):
+        if hasattr(self, 'queue_window') and self.queue_window.winfo_exists():
+            self.queue_window.lift()
+            return
+            
+        self.queue_window = tk.Toplevel(self.master)
+        self.queue_window.title("Calls in Queue")
+        self.queue_window.geometry("800x600")
+        self.queue_window.configure(bg="#FFB6C1")
+
+        # Frame principal
+        self.main_frame_queue = tk.Frame(self.queue_window, bg="#FFB6C1")
+        self.main_frame_queue.pack(fill="both", expand=True, padx=20, pady=10)
+
+        self.title_label_queue = tk.Label(self.main_frame_queue, text="Active Calls in Queue",
+                                        font=("Arial", 20, "bold"), fg="black", bg="#FFB6C1")
+        self.title_label_queue.pack(pady=10)
+
+        # Frame para el contenido con scroll
+        self.content_frame_queue = tk.Frame(self.main_frame_queue, bg="white", bd=2, relief="solid")
+        self.content_frame_queue.pack(fill="both", expand=True, pady=(0, 10))
+
+        # Crear tabla para mostrar las skills y sus llamadas en cola
+        columns = ("Skill Name", "Calls in Queue", "Oldest Call", "Staffed", "Available")
+        self.queue_tree = ttk.Treeview(self.content_frame_queue, columns=columns, show="headings", height=20)
+
+        # Configurar columnas
+        self.queue_tree.heading("Skill Name", text="Skill Name")
+        self.queue_tree.heading("Calls in Queue", text="Calls in Queue")
+        self.queue_tree.heading("Oldest Call", text="Oldest Call")
+        self.queue_tree.heading("Staffed", text="Staffed")
+        self.queue_tree.heading("Available", text="Available")
+
+        self.queue_tree.column("Skill Name", width=250, anchor="w")
+        self.queue_tree.column("Calls in Queue", width=100, anchor="center")
+        self.queue_tree.column("Oldest Call", width=100, anchor="center")
+        self.queue_tree.column("Staffed", width=80, anchor="center")
+        self.queue_tree.column("Available", width=80, anchor="center")
+
+        # Scrollbar
+        self.scrollbar_queue = ttk.Scrollbar(self.content_frame_queue, orient="vertical", command=self.queue_tree.yview)
+        self.queue_tree.configure(yscrollcommand=self.scrollbar_queue.set)
+
+        # Empaquetar
+        self.queue_tree.pack(side="left", fill="both", expand=True)
+        self.scrollbar_queue.pack(side="right", fill="y")
+
+        # Función para actualizar la tabla de llamadas en cola
+        def update_queue():
+            if not self.queue_window.winfo_exists():  # Si la ventana fue cerrada, no hacer nada
+                return
+                
+            # Limpiar la tabla
+            for row in self.queue_tree.get_children():
+                self.queue_tree.delete(row)
+
+            # Filtrar para mostrar solo skills con llamadas en cola
+            filtered_queue_list = [skill for skill in self.queue_list if int(skill['calls_in_queue']) > 0]
+
+            if not filtered_queue_list:
+                # Si no hay llamadas en cola, mostrar un mensaje
+                self.queue_tree.insert("", "end", values=("No calls currently in queue for any skill.", "", "", "", ""))
+            else:
+                # Llenar la tabla con datos filtrados
+                for skill in filtered_queue_list:
+                    values = (
+                        skill['skill_name'],
+                        skill['calls_in_queue'],
+                        skill['oldest_call'],
+                        skill['staffed'],
+                        skill['available']
+                    )
+                    self.queue_tree.insert("", "end", values=values, tags=("has_calls",))
+
+            # Programar la próxima actualización si la ventana sigue abierta
+            if self.queue_window.winfo_exists():
+                self.queue_window.after(15000, update_queue)
+
+        # Llamar a la función de actualización por primera vez
+        update_queue()
+
+        # Configurar tag para filas resaltadas
+        self.queue_tree.tag_configure("has_calls", background="#ffcccc")
+
+        # Frame para el botón
+        button_frame = tk.Frame(self.queue_window, bg="#FFB6C1")
+        button_frame.pack(fill="x", pady=10)
+
+        close_button = tk.Button(button_frame, text="Close",
+                               font=("Arial", 12, "bold"), bg="red", fg="white",
+                               command=self.queue_window.destroy)
+        close_button.pack(pady=5)
+
+    def create_interface(self):
+        # Logo de Newell Brands
+        canvas = tk.Canvas(self.master, width=250, height=100, bg="#F6F0FF", highlightthickness=0)
+        canvas.place(relx=0.5, rely=0.12, anchor="center")
+
+        # Función para dibujar un rectángulo con esquinas redondeadas
+        def create_rounded_rectangle(canvas, x1, y1, x2, y2, radius=25, **kwargs):
+            points = [
+                x1 + radius, y1,
+                x2 - radius, y1,
+                x2, y1,
+                x2, y1 + radius,
+                x2, y2 - radius,
+                x2, y2,
+                x2 - radius, y2,
+                x1 + radius, y2,
+                x1, y2,
+                x1, y2 - radius,
+                x1, y1 + radius,
+                x1, y1,
+                x1 + radius, y1
+            ]
+            return canvas.create_polygon(points, **kwargs, smooth=True)
+
+        # Dibujar el logo con esquinas redondeadas
+        create_rounded_rectangle(canvas, 10, 30, 240, 90, radius=20, fill="#0056A7", outline="black", width=2)
+        canvas.create_text(125, 60, text="Newell Brands", font=("Arial", 18, "bold"), fill="white")
+
+        # Texto "IntouchCX" en la esquina superior izquierda
+        intouch_label = tk.Label(
+            self.master,
+            text="IntouchCX",
+            font=("Arial", 35, "bold"),
+            fg="#6A0DAD",
+            bg="#F6F0FF",
+            padx=10,
+            pady=5
+        )
+        intouch_label.place(relx=0.02, rely=0.095, anchor="nw")
+
+        # Botón para cambiar al dashboard de colas
+        queue_dashboard_button = tk.Button(
+            self.master,
+            text="Switch to Queue Dashboard",
+            command=self.open_queue_dashboard,
+            bg="#6A0DAD",
+            fg="white",
+            font=("Arial", 12, "bold")
+        )
+        queue_dashboard_button.place(relx=0.98, rely=0.095, anchor="ne")
+
+        # Resto de la interfaz (tabla, botones, etc.)
+        frame_table = tk.Frame(self.master, bg="#F6F0FF")
+        frame_table.place(relx=0.5, rely=0.5, anchor="center", relwidth=0.95, relheight=0.6)
+
+        columns = ("Avaya ID", "Full Name", "State", "Reason Code", "Active Call", "Call Duration", "Skill Name", "Time in State")
+        self.tree = ttk.Treeview(frame_table, columns=columns, show="headings")
+
+        # Configurar columnas
+        for col in columns:
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=100)
+
+        # Configurar colores alternados para las filas
+        self.tree.tag_configure("even", background="#DAC8FF")
+        self.tree.tag_configure("odd", background="#D0B5FF")
+
+        scrollbar = ttk.Scrollbar(frame_table, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        self.tree.pack(expand=True, fill="both")
+
+        # Frame para los botones
+        button_frame = tk.Frame(self.master, bg="#F6F0FF")
+        button_frame.place(relx=0.5, rely=0.9, anchor="center")
+
+        # Botón de alertas
+        alert_button = tk.Button(button_frame, text="View Alerts", command=self.show_alert_window,
+                               bg="#6A0DAD", fg="white", font=("Arial", 12, "bold"))
+        alert_button.pack(side="left", padx=5)
+
+        # Botón de AUX
+        aux_button = tk.Button(button_frame, text="View AUX Status", command=self.show_aux_window,
+                             bg="#6A0DAD", fg="white", font=("Arial", 12, "bold"))
+        aux_button.pack(side="left", padx=5)
+
+        # Botón de Queue
+        queue_button = tk.Button(button_frame, text="View Queue", command=self.show_queue_window,
+                               bg="#6A0DAD", fg="white", font=("Arial", 12, "bold"))
+        queue_button.pack(side="left", padx=5)
+
+        # Botón de configuración
+        settings_button = tk.Button(button_frame, text="Settings", command=self.show_settings_window,
+                                  bg="#6A0DAD", fg="white", font=("Arial", 12, "bold"))
+        settings_button.pack(side="left", padx=5)
+
+    def open_queue_dashboard(self):
+        self.master.withdraw()  # Ocultar la ventana actual
+        queue_root = tk.Toplevel()
+        queue_root.protocol("WM_DELETE_WINDOW", lambda: self.close_queue_dashboard(queue_root))
+        QueueDashboard(queue_root, self)
+
+    def close_queue_dashboard(self, queue_root):
+        queue_root.destroy()
+        self.master.deiconify()  # Mostrar nuevamente la ventana principal
+
+    def on_closing(self):
+        """Método para manejar el cierre de la aplicación"""
+        self.running = False  # Detener las actualizaciones
+        if self.update_task:
+            self.master.after_cancel(self.update_task)
+        self.master.destroy()
+
+
+class QueueDashboard:
+    def __init__(self, root, agent_app):
+        self.root = root
+        self.agent_app = agent_app
+        self.root.title("Queue Monitoring Dashboard")
+        self.root.geometry("1400x800")
+        self.root.configure(bg='#6a0dad')
+        self.running = True
+        self.highlight_labels = {}
+
+        # Configure styles
+        self.style = ttk.Style()
+        self.style.theme_use('clam')
+        
+        # General style configurations
+        self.style.configure(".", background='#6a0dad', foreground='white')
+
+        # Treeview styles
+        self.style.configure("Treeview", 
+                           font=('Arial', 10), 
+                           rowheight=25,
+                           background='#d8bfd8',
+                           fieldbackground='#d8bfd8',
+                           foreground='black')
+        self.style.configure("Treeview.Heading", 
+                           font=('Arial', 10, 'bold'),
+                           background='#9370db',
+                           foreground='white',
+                           relief='flat')
+        self.style.map("Treeview.Heading", 
+                      background=[('active', '#ba55d3')])
+        
+        # Label styles
+        self.style.configure("Header.TLabel", 
+                           font=('Arial', 18, 'bold'),
+                           background='#6a0dad',
+                           foreground='white')
+        self.style.configure("Info.TLabel", 
+                           font=('Arial', 10),
+                           background='#6a0dad',
+                           foreground='white')
+
+        # Button styles
+        self.style.configure("Toggle.TButton",
+                           font=('Arial', 10, 'bold'),
+                           background='#9370db',
+                           foreground='white',
+                           borderwidth=1,
+                           relief='raised')
+        self.style.map("Toggle.TButton",
+                      background=[('pressed', '#8a2be2'),
+                                 ('active', '#ba55d3'),
+                                 ('disabled', '#cccccc')],
+                      foreground=[('pressed', 'white'),
+                                 ('active', 'white'),
+                                 ('disabled', '#666666')])
+
+        # Main container
+        self.main_frame = ttk.Frame(root, padding="20")
+        self.main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Header with logo and title
+        header_frame = tk.Frame(self.main_frame, bg='#6a0dad')
+        header_frame.pack(fill=tk.X, pady=(0, 20))
+
+        left_header = tk.Frame(header_frame, bg='#6a0dad')
+        left_header.pack(side=tk.LEFT, padx=10, pady=5)
+        intouch_logo = tk.Label(left_header, 
+                              text="IntouchCX", 
+                              font=('Arial', 18, 'bold'),
+                              bg='#6a0dad',
+                              fg='white')
+        intouch_logo.pack(side=tk.LEFT)
+
+        center_header = tk.Frame(header_frame, bg='#6a0dad')
+        center_header.pack(side=tk.LEFT, expand=True, fill=tk.X)
+        ttk.Label(center_header, 
+                 text="Queue Monitoring Dashboard", 
+                 style="Header.TLabel").pack(pady=5)
+
+        right_header = tk.Frame(header_frame, bg='#6a0dad')
+        right_header.pack(side=tk.RIGHT, padx=10, pady=5)
+
+        # Botón para regresar al dashboard principal
+        back_button = tk.Button(
+            right_header,
+            text="Back to Agent Dashboard",
+            command=self.open_agent_dashboard,
+            bg="#9370db",
+            fg="white",
+            font=("Arial", 10, "bold")
+        )
+        back_button.pack(side=tk.LEFT, padx=5)
+
+        # Botón para copiar datos
+        copy_button = tk.Button(
+            right_header,
+            text="Copy SLA Data",
+            command=self.copy_sla_data,
+            bg="#9370db",
+            fg="white",
+            font=("Arial", 10, "bold")
+        )
+        copy_button.pack(side=tk.LEFT, padx=5)
+
+        newell_frame = tk.Frame(right_header, 
+                             bg='#0056A7', 
+                             width=120,
+                             height=60)
+        newell_frame.pack_propagate(0)
+        newell_frame.pack(side=tk.RIGHT)
+        newell_label = tk.Label(newell_frame, 
+                             text="Newell", 
+                             font=('Arial', 16, 'bold'),
+                             bg='#0056A7',
+                             fg='white')
+        newell_label.pack(expand=True)
+
+        # Control panel
+        control_frame = ttk.Frame(self.main_frame)
+        control_frame.pack(fill=tk.X, pady=(0, 20))
+
+        button_container = ttk.Frame(control_frame)
+        button_container.pack(side=tk.LEFT, padx=20)
+        self.main_view_button = ttk.Button(
+            button_container, 
+            text="Main View", 
+            style="Toggle.TButton",
+            command=lambda: self.toggle_view('main')
+        )
+        self.main_view_button.pack(side=tk.LEFT)
+        self.agents_view_button = ttk.Button(
+            button_container, 
+            text="Agents View", 
+            style="Toggle.TButton",
+            command=lambda: self.toggle_view('agents')
+        )
+        self.agents_view_button.pack(side=tk.LEFT, padx=5)
+
+        # Column configurations for different views
+        self.column_configs = {
+            'main': [
+                ('skill_name', 'Skill Name', 180, tk.W),
+                ('calls_in_queue', 'Calls in Queue', 100, tk.CENTER),
+                ('offered', 'Offered', 80, tk.CENTER),
+                ('answered', 'Answered', 80, tk.CENTER),
+                ('transfers', 'Transfers', 80, tk.CENTER),
+                ('true_abn', 'True Abn', 80, tk.CENTER),
+                ('short_abn', 'Short Abn', 80, tk.CENTER),
+                ('oldest_call', 'Oldest Call', 100, tk.CENTER),
+                ('max_delay', 'Max Delay', 100, tk.CENTER),
+                ('asa', 'ASA', 80, tk.CENTER),
+                ('aqt', 'AQT', 80, tk.CENTER),
+                ('service_level', 'Service Level %', 120, tk.CENTER),
+                ('rt_sl', 'RT SL %', 100, tk.CENTER)
+            ],
+            'agents': [
+                ('skill_name', 'Skill Name', 180, tk.W),
+                ('staffed', 'Staffed', 80, tk.CENTER),
+                ('available', 'Available', 80, tk.CENTER),
+                ('acw', 'ACW', 80, tk.CENTER),
+                ('acd', 'ACD', 80, tk.CENTER),
+                ('aux', 'AUX', 80, tk.CENTER),
+                ('other', 'Other', 80, tk.CENTER)
+            ]
+        }
+
+        all_columns = []
+        for view in self.column_configs.values():
+            all_columns.extend([col[0] for col in view])
+        all_columns = list(dict.fromkeys(all_columns))
+
+        # Contenedor principal para el Treeview y scrollbar
+        tree_container = tk.Frame(self.main_frame)
+        tree_container.pack(fill=tk.BOTH, expand=True)
+
+        # Scrollbar vertical
+        scrollbar = ttk.Scrollbar(tree_container)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Treeview
+        self.tree = ttk.Treeview(
+            tree_container,
+            columns=all_columns,
+            show='headings',
+            yscrollcommand=scrollbar.set,
+            selectmode='browse'
+        )
+        self.tree.pack(fill=tk.BOTH, expand=True)
+        scrollbar.config(command=self.tree.yview)
+
+        # Configurar todas las columnas
+        self.configure_all_columns()
+
+        self.current_view = 'main'
+        self.toggle_view('main')
+
+        # Configurar tags para las filas
+        self.tree.tag_configure('normal', background='#DAC8FF')
+        self.tree.tag_configure('alternate', background='#D0B5FF')
+        self.tree.tag_configure('calls_warning', background='#E66F6F')  # Light red for calls in queue
+        self.tree.tag_configure('sl_warning', background='#CE2424')     # Medium red for SLA < 80%
+        self.tree.tag_configure('both_warning', background='#660002', foreground='white')  # Dark red for both
+
+        # Frame para los highlights (superpuesto al Treeview)
+        self.highlight_frame = tk.Frame(tree_container)
+        self.highlight_frame.place(in_=self.tree, relx=0, rely=0, relwidth=1, relheight=1)
+        self.highlight_frame.lower(self.tree)  # Colocar detrás del Treeview
+
+        self.current_data = []
+        self.start_auto_refresh()
+        self.refresh_data()
+
+        # Configurar eventos para actualizar highlights
+        self.tree.bind("<Configure>", self.update_highlights)
+        self.tree.bind("<MouseWheel>", self.on_mousewheel)
+
+    def copy_sla_data(self):
+        """Copy the current SLA data to clipboard in the requested format"""
+        try:
+            # Get skills with SLA below 80%
+            low_sla_skills = []
+            for skill in self.current_data:
+                try:
+                    sl_value = float(skill.get('service_level', '0%').rstrip('%'))
+                    if sl_value < 80:
+                        skill_name = skill.get('skill_name', '')
+                        sl_percent = skill.get('service_level', '0%')
+                        low_sla_skills.append(f"{skill_name} = {sl_percent}")
+                except ValueError:
+                    continue
+            
+            # Prepare the text to copy
+            if low_sla_skills:
+                text_to_copy = (
+                    "Voice - Queue\n\n"
+                    "Team, this is our current SLA view and listed you'll find the impacted skills so far:\n\n"
+                    + "\n".join([f"- {skill}" for skill in low_sla_skills]) + 
+                    "\n\nThe other skills are on target."
+                )
+            else:
+                text_to_copy = (
+                    "Voice - Queue\n\n"
+                    "All skills are currently meeting SLA targets (80% or above)"
+                )
+            
+            # Copy to clipboard
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text_to_copy)
+            
+            # Show toast notification
+            self.show_toast("SLA data copied to clipboard!")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to copy data: {str(e)}")
+
+    def show_toast(self, message):
+        """Show a temporary toast notification"""
+        toast = tk.Toplevel(self.root)
+        toast.overrideredirect(True)
+        toast.geometry(f"+{self.root.winfo_rootx()+50}+{self.root.winfo_rooty()+50}")
+        
+        label = tk.Label(toast, text=message, bg="#4CAF50", fg="white", padx=20, pady=10)
+        label.pack()
+        
+        # Auto-close after 3 seconds
+        toast.after(3000, toast.destroy)
+
+    def on_mousewheel(self, event):
+        self.tree.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        self.update_highlights()
+        return "break"
+
+    def update_highlights(self, event=None):
+        for item_id, label in self.highlight_labels.items():
+            if self.tree.exists(item_id):
+                bbox = self.tree.bbox(item_id, column='#2')
+                if bbox:
+                    x, y, width, height = bbox
+                    label.place(x=x, y=y, width=width, height=height)
+
+    def configure_all_columns(self):
+        for view in self.column_configs.values():
+            for col_id, heading, width, anchor in view:
+                self.tree.heading(col_id, text=heading)
+                self.tree.column(col_id, width=width, anchor=anchor)
+
+    def toggle_view(self, view_name):
+        if view_name == self.current_view:
+            return
+        self.current_view = view_name
+        
+        for col in self.tree['columns']:
+            self.tree.column(col, width=0, stretch=False)
+        
+        for col_id, _, width, _ in self.column_configs[view_name]:
+            self.tree.column(col_id, width=width, stretch=True)
+        
+        if view_name == 'main':
+            self.main_view_button.state(['pressed', 'disabled'])
+            self.agents_view_button.state(['!pressed', '!disabled'])
+        else:
+            self.main_view_button.state(['!pressed', '!disabled'])
+            self.agents_view_button.state(['pressed', 'disabled'])
+        
+        self.display_current_data()
+
+    def display_current_data(self):
+        if not hasattr(self, 'running') or not self.running:
+            return
+            
+        for label in self.highlight_labels.values():
+            label.destroy()
+        self.highlight_labels = {}
+        
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+            
+        for i, row_data in enumerate(self.current_data):
+            # Crear una copia para modificar los datos de visualización
+            display_data = row_data.copy()
+            
+            # Verificar si hay llamadas en cola y estamos en vista principal
+            calls_in_queue = display_data.get('calls_in_queue', '0')
+            has_calls = calls_in_queue.isdigit() and int(calls_in_queue) > 0
+            
+            if has_calls and self.current_view == 'main':
+                display_data['calls_in_queue'] = f"⚠️{calls_in_queue}⚠️"
+            
+            if self.current_view == 'main':
+                values = [
+                    display_data.get('skill_name', ''),
+                    display_data.get('calls_in_queue', ''),
+                    display_data.get('offered', ''),
+                    display_data.get('answered', ''),
+                    display_data.get('transfers', ''),
+                    display_data.get('true_abn', ''),
+                    display_data.get('short_abn', ''),
+                    display_data.get('oldest_call', ''),
+                    display_data.get('max_delay', ''),
+                    display_data.get('asa', ''),
+                    display_data.get('aqt', ''),
+                    display_data.get('service_level', ''),
+                    display_data.get('rt_sl', '')
+                ]
+                values.extend([''] * (len(self.tree['columns']) - len(values)))
+            else:
+                values = [''] * len(self.tree['columns'])
+                for j, (col_id, _, _, _) in enumerate(self.column_configs['agents']):
+                    col_index = self.tree['columns'].index(col_id)
+                    values[col_index] = display_data.get(col_id, '')
+
+            # Determinar el tag apropiado
+            try:
+                sl_value = float(display_data.get('service_level', '0').rstrip('%'))
+                low_sla = sl_value < 80
+            except ValueError:
+                low_sla = False
+                
+            if self.current_view == 'main':
+                if has_calls and low_sla:
+                    tag = 'both_warning'
+                elif has_calls:
+                    tag = 'calls_warning'
+                elif low_sla:
+                    tag = 'sl_warning'
+                else:
+                    tag = 'alternate' if i % 2 else 'normal'
+            else:
+                tag = 'alternate' if i % 2 else 'normal'
+
+            item = self.tree.insert('', tk.END, values=values, tags=(tag,))
+            
+            # Solo para la vista principal y si hay llamadas en cola
+            if has_calls and self.current_view == 'main':
+                highlight = tk.Label(
+                    self.highlight_frame, 
+                    text=calls_in_queue,
+                    font=('Arial', 10, 'bold'),
+                    background="#CE2424",
+                    foreground="white",
+                    bd=0
+                )
+                self.highlight_labels[item] = highlight
+                    
+        self.update_highlights()
+
+    def refresh_data(self):
+        try:
+            if not self.root.winfo_exists():
+                return
+                
+            self.root.config(cursor="wait")
+            self.root.update()
+            
+            html_content = self.fetch_api_data()
+            self.process_data(html_content)
+        except Exception as e:
+            if self.root.winfo_exists():
+                messagebox.showerror("Error", f"Failed to load data: {str(e)}")
+        finally:
+            if self.root.winfo_exists():
+                self.root.config(cursor="")
+
+    def process_data(self, html_content):
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            self.current_data = []
+            rows = soup.find_all('tr', class_='data')[2:]
+            
+            for row in rows:
+                cells = row.find_all('td')
+                if not cells or len(cells) < 19:
+                    continue
+                
                 try:
                     skill_info = cells[0]
                     strong_tag = skill_info.find('strong')
@@ -1618,30 +1219,9 @@ class UserSession:
                     skill_name = strong_tag.text.strip()
                     skill_id = cells[0].text.strip().split('(')[-1].split(')')[0].strip()
                     
-                    # Get SLA value for warning classes
-                    service_level = cells[11].text.strip() if len(cells) > 11 else '0%'
-                    try:
-                        sl_value = float(service_level.rstrip('%'))
-                    except ValueError:
-                        sl_value = 0
-                    
-                    calls_in_queue = cells[1].text.strip() if len(cells) > 1 else '0'
-                    has_calls = calls_in_queue.isdigit() and int(calls_in_queue) > 0
-                    
-                    # Determine row class for warnings
-                    row_class = ""
-                    if has_calls and sl_value < 80:
-                        row_class = "both-warning"
-                    elif has_calls:
-                        row_class = "calls-warning"
-                    elif sl_value < 80:
-                        row_class = "sl-warning"
-                    else:
-                        row_class = "normal-row" if len(self.skills_data) % 2 == 0 else "alternate-row"
-                    
-                    self.skills_data.append({
+                    row_data = {
                         'skill_name': f"{skill_name} ({skill_id})",
-                        'calls_in_queue': calls_in_queue,
+                        'calls_in_queue': cells[1].text.strip() if len(cells) > 1 else '',
                         'offered': cells[2].text.strip() if len(cells) > 2 else '',
                         'answered': cells[3].text.strip() if len(cells) > 3 else '',
                         'transfers': cells[4].text.strip() if len(cells) > 4 else '',
@@ -1651,150 +1231,94 @@ class UserSession:
                         'max_delay': cells[8].text.strip() if len(cells) > 8 else '',
                         'asa': cells[9].text.strip() if len(cells) > 9 else '',
                         'aqt': cells[10].text.strip() if len(cells) > 10 else '',
-                        'service_level': service_level,
+                        'service_level': cells[11].text.strip() if len(cells) > 11 else '0%',
                         'rt_sl': cells[12].text.strip() if len(cells) > 12 else '',
                         'staffed': cells[13].text.strip() if len(cells) > 13 else '',
                         'available': cells[14].text.strip() if len(cells) > 14 else '',
                         'acw': cells[15].text.strip() if len(cells) > 15 else '',
                         'acd': cells[16].text.strip() if len(cells) > 16 else '',
                         'aux': cells[17].text.strip() if len(cells) > 17 else '',
-                        'other': cells[18].text.strip() if len(cells) > 18 else '',
-                        'row_class': row_class
-                    })
+                        'other': cells[18].text.strip() if len(cells) > 18 else ''
+                    }
+                    self.current_data.append(row_data)
                 except (IndexError, AttributeError) as e:
-                    print(f"Error processing skill row: {str(e)}")
+                    print(f"Error processing row: {str(e)}")
                     continue
+                    
+            self.display_current_data()
+        except Exception as e:
+            raise Exception(f"Error processing data: {str(e)}")
 
-@app.route('/')
-def index():
-    session_id = request.cookies.get('session_id')
-    if not session_id or session_id not in user_sessions:
-        session_id = str(uuid.uuid4())
-        user_sessions[session_id] = UserSession()
-    
-    session = user_sessions[session_id]
-    
-    # Notification for calls in queue
-    notification = None
-    if session.total_calls_in_queue > 0:
-        notification = f"Warning: {session.total_calls_in_queue} calls in queue! Click 'View Queue' for details."
-    
-    response = make_response(render_template_string(
-        HTML_TEMPLATE,
-        agents=session.agents,
-        alerts_count=len(session.alert_list),
-        aux_count=len(session.aux_list),
-        queue_count=session.total_calls_in_queue,
-        notification=notification,
-        update_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        refresh_interval=REFRESH_INTERVAL
-    ))
-    
-    if not request.cookies.get('session_id'):
-        response.set_cookie('session_id', session_id)
-    
-    return response
-
-@app.route('/alerts')
-def show_alerts():
-    session_id = request.cookies.get('session_id')
-    if not session_id or session_id not in user_sessions:
-        return "Invalid session", 400
-    
-    session = user_sessions[session_id]
-    
-    # Organize alerts by type
-    alert_dict = {}
-    for alert, avaya_id, full_name, alert_time in session.alert_list:
-        if alert not in alert_dict:
-            alert_dict[alert] = []
-        alert_dict[alert].append(f"{avaya_id} - {full_name} ({alert_time})")
-    
-    return render_template_string(
-        ALERTS_TEMPLATE,
-        alerts=alert_dict,
-        refresh_interval=REFRESH_INTERVAL
-    )
-
-@app.route('/aux')
-def show_aux():
-    session_id = request.cookies.get('session_id')
-    if not session_id or session_id not in user_sessions:
-        return "Invalid session", 400
-    
-    session = user_sessions[session_id]
-    
-    # Organize AUX by type
-    aux_dict = {}
-    for aux_type, avaya_id, full_name, time_in_state in session.aux_list:
-        if aux_type not in aux_dict:
-            aux_dict[aux_type] = []
-        aux_dict[aux_type].append(f"{avaya_id} - {full_name} ({time_in_state})")
-    
-    return render_template_string(
-        AUX_TEMPLATE,
-        aux_list=aux_dict,
-        refresh_interval=REFRESH_INTERVAL
-    )
-
-@app.route('/queue')
-def show_queue():
-    session_id = request.cookies.get('session_id')
-    if not session_id or session_id not in user_sessions:
-        return "Invalid session", 400
-    
-    session = user_sessions[session_id]
-    
-    # Filter to only show skills with calls in queue
-    queue_with_calls = [skill for skill in session.queue_list if skill['calls_in_queue'] != '0']
-    
-    return render_template_string(
-        QUEUE_TEMPLATE,
-        queue_list=queue_with_calls if queue_with_calls else None,
-        refresh_interval=REFRESH_INTERVAL
-    )
-
-@app.route('/queue-dashboard')
-def queue_dashboard():
-    session_id = request.cookies.get('session_id')
-    if not session_id or session_id not in user_sessions:
-        return "Invalid session", 400
-    
-    session = user_sessions[session_id]
-    view = request.args.get('view', 'main')
-    
-    return render_template_string(
-        QUEUE_DASHBOARD_TEMPLATE,
-        skills=session.skills_data,
-        view=view,
-        update_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        refresh_interval=REFRESH_INTERVAL
-    )
-
-@app.route('/settings', methods=['GET', 'POST'])
-def show_settings():
-    session_id = request.cookies.get('session_id')
-    if not session_id or session_id not in user_sessions:
-        return "Invalid session", 400
-    
-    session = user_sessions[session_id]
-    
-    message = None
-    
-    if request.method == 'POST':
+    def fetch_api_data(self):
         try:
-            for alert in session.alert_times:
-                session.alert_times[alert] = int(request.form.get(alert, session.alert_times[alert]))
-            message = {'type': 'success', 'text': 'Alert settings updated successfully'}
-        except ValueError:
-            message = {'type': 'error', 'text': 'Please enter valid numbers for all fields'}
-    
-    return render_template_string(
-        SETTINGS_TEMPLATE,
-        alert_times=session.alert_times,
-        message=message,
-        refresh_interval=REFRESH_INTERVAL
-    )
+            url = "https://reports.intouchcx.com/reports/lib/getRealtimeManagementFull.asp"
+            payload = {
+                "split": "3900,3901,3902,3903,3904,3905,3906,3907,3908,3909,3910,3911,3912,3913,3914,3915,3916,3917,3918,3919,3920,3921,3922,3923,3924,3925,3926,3927,3928,3929,3930,3931,3932,3933,3934,3935,3936,3937,3938,3939,3940,3941,3942,3943,3944,3945,3946,3947,3948,3949,3950,3951,3952,3953,3954,3955,3956,3957,3958,3959,3960,3961,3962,3963,3964,3965,3966,3967,3968,3969,3970,3971,3972,3973",
+                "firstSortCol": "FullName",
+                "firstSortDir": "ASC",
+                "secondSortCol": "FullName",
+                "secondSortDir": "ASC",
+                "reason": "all",
+                "state": "all",
+                "timezone": "1",
+                "altSL": "",
+                "threshold": "180",
+                "altSLThreshold": "0",
+                "acdAlert": "",
+                "acwAlert": "",
+                "holdAlert": "",
+                "slAlert": "",
+                "asaAlert": ""
+            }
+            headers = {
+                "Accept": "text/html, */*; q=0.01",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Accept-Language": "en-US,en;q=0.9,es;q=0.8",
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "X-Requested-With": "XMLHttpRequest",
+                "Referer": "https://reports.intouchcx.com/reports/custom/newellbrands/realtimemanagementfull.asp?threshold=180&tzoffset=est"
+            }
+            response = requests.post(
+                url,
+                data=payload,
+                headers=headers,
+                timeout=10
+            )
+            response.raise_for_status()
+            return response.text
+        except requests.RequestException as e:
+            raise Exception(f"Failed to fetch data: {str(e)}")
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
+    def start_auto_refresh(self):
+        def refresh_loop():
+            while self.running:
+                time.sleep(15)
+                try:
+                    if self.root.winfo_exists():
+                        self.root.after(0, self.refresh_data)
+                except:
+                    break
+                    
+        thread = threading.Thread(target=refresh_loop, daemon=True)
+        thread.start()
+
+    def open_agent_dashboard(self):
+        if self.agent_app.master.winfo_exists():
+            self.running = False
+            for label in self.highlight_labels.values():
+                label.destroy()
+            self.highlight_labels = {}
+            self.root.destroy()
+            self.agent_app.master.deiconify()
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = NewellBrandsVoice(root)
+    
+    # Configurar el manejo de cierre para Render
+    if os.environ.get('RENDER', 'False').lower() == 'true':
+        root.protocol("WM_DELETE_WINDOW", app.on_closing)
+    
+    root.mainloop()
