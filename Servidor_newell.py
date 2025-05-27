@@ -808,13 +808,13 @@ ouchCX</div>
         <div class="tab-content active" id="agents-tab">
             <div class="button-container">
                 <button class="button alert" onclick="showAlerts()">
-                    View Alerts
-                    {% if alert_count > 0 %}<span class="badge">{{ alert_count }}</span>{% endif %}
-                </button>
-                <button class="button aux" onclick="showAuxStatus()">
-                    View AUX Status
-                    {% if aux_count > 0 %}<span class="badge aux-badge">{{ aux_count }}</span>{% endif %}
-                </button>
+    View Alerts
+    {% if alert_count > 0 %}<span class="badge">{{ alert_count }}</span>{% endif %}
+</button>
+<button class="button aux" onclick="showAuxStatus()">
+    View AUX Status
+    {% if aux_count > 0 %}<span class="badge aux-badge">{{ aux_count }}</span>{% endif %}
+</button>
                 <button class="button" onclick="showQueue()">View Queue</button>
                 <button class="button secondary" onclick="showSettings()">Settings</button>
             </div>
@@ -1179,61 +1179,74 @@ ouchCX</div>
         
         // Auto-refresh only the current view without changing tabs
         function refreshData() {
-            const activeTab = document.querySelector('.tab.active').textContent.trim();
-            const currentQueueView = document.getElementById('agents-view').style.display === 'none' ? 'main' : 'agents';
-            
-            fetch(window.location.href, {
-                headers: {
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'Accept': 'text/html',
-                },
-                cache: 'no-store'
-            })
-            .then(response => response.text())
-            .then(html => {
-                const parser = new DOMParser();
-                const newDoc = parser.parseFromString(html, 'text/html');
-                
-                if (activeTab.includes('Agent')) {
-                    // Update agents tab
-                    const newContent = newDoc.getElementById('agents-tab');
-                    if (newContent) {
-                        document.getElementById('agents-tab').innerHTML = newContent.innerHTML;
-                    }
-                    
-                    // Update alerts and aux windows if they're open
-                    if (document.getElementById('alerts-window').style.display === 'block') {
-                        const newAlertsWindow = newDoc.getElementById('alerts-window');
-                        document.getElementById('alerts-window').innerHTML = newAlertsWindow.innerHTML;
-                    }
-                    
-                    if (document.getElementById('aux-window').style.display === 'block') {
-                        const newAuxWindow = newDoc.getElementById('aux-window');
-                        document.getElementById('aux-window').innerHTML = newAuxWindow.innerHTML;
-                    }
-                } else {
-                    // Update queue tab
-                    const newContent = newDoc.getElementById('queue-tab');
-                    if (newContent) {
-                        document.getElementById('queue-tab').innerHTML = newContent.innerHTML;
-                        // Restore current view
-                        switchView(currentQueueView);
-                    }
-                }
-                
-                // Update header and notification
-                const newHeader = newDoc.querySelector('.last-updated');
-                if (newHeader) {
-                    document.querySelector('.last-updated').textContent = newHeader.textContent;
-                }
-                
-                const newNotification = newDoc.getElementById('queue-notification');
-                if (newNotification) {
-                    document.getElementById('queue-notification').style.display = newNotification.style.display;
-                }
-            })
-            .catch(error => console.error('Error refreshing data:', error));
+    const activeTab = document.querySelector('.tab.active').textContent.trim();
+    const currentQueueView = document.getElementById('agents-view').style.display === 'none' ? 'main' : 'agents';
+    
+    fetch(window.location.href, {
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'text/html',
+        },
+        cache: 'no-store'
+    })
+    .then(response => response.text())
+    .then(html => {
+        const parser = new DOMParser();
+        const newDoc = parser.parseFromString(html, 'text/html');
+        
+        // Update header and notification first
+        const newHeader = newDoc.querySelector('.last-updated');
+        if (newHeader) {
+            document.querySelector('.last-updated').textContent = newHeader.textContent;
         }
+        
+        const newNotification = newDoc.getElementById('queue-notification');
+        if (newNotification) {
+            document.getElementById('queue-notification').style.display = newNotification.style.display;
+            document.getElementById('queue-notification').textContent = newNotification.textContent;
+        }
+        
+        // Update button counts
+        const newAlertButton = newDoc.querySelector('.button.alert');
+        const newAuxButton = newDoc.querySelector('.button.aux');
+        if (newAlertButton) {
+            const alertButton = document.querySelector('.button.alert');
+            alertButton.innerHTML = newAlertButton.innerHTML;
+        }
+        if (newAuxButton) {
+            const auxButton = document.querySelector('.button.aux');
+            auxButton.innerHTML = newAuxButton.innerHTML;
+        }
+        
+        if (activeTab.includes('Agent')) {
+            // Update agents tab
+            const newContent = newDoc.getElementById('agents-tab');
+            if (newContent) {
+                document.getElementById('agents-tab').innerHTML = newContent.innerHTML;
+            }
+            
+            // Update alerts and aux windows if they're open
+            if (document.getElementById('alerts-window').style.display === 'block') {
+                const newAlertsWindow = newDoc.getElementById('alerts-window');
+                document.getElementById('alerts-window').innerHTML = newAlertsWindow.innerHTML;
+            }
+            
+            if (document.getElementById('aux-window').style.display === 'block') {
+                const newAuxWindow = newDoc.getElementById('aux-window');
+                document.getElementById('aux-window').innerHTML = newAuxWindow.innerHTML;
+            }
+        } else {
+            // Update queue tab
+            const newContent = newDoc.getElementById('queue-tab');
+            if (newContent) {
+                document.getElementById('queue-tab').innerHTML = newContent.innerHTML;
+                // Restore current view
+                switchView(currentQueueView);
+            }
+        }
+    })
+    .catch(error => console.error('Error refreshing data:', error));
+}
         
         // Refresh every 15 seconds
         setInterval(refreshData, 15000);
